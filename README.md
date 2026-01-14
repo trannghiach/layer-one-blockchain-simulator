@@ -1,12 +1,9 @@
 # Layer 1 Blockchain Simulator
 
-## 1. Thông tin sinh viên
-- **22120231**: Trần Trọng Nghĩa
-
-## 2. Giới thiệu
+## 1. Giới thiệu
 Dự án mô phỏng một mạng lưới Blockchain Layer 1 với cơ chế đồng thuận dựa trên biểu quyết (Voting-based Consensus), đảm bảo tính an toàn (Safety) và tính sống (Liveness) ngay cả trong điều kiện mạng không tin cậy (mất gói tin, độ trễ ngẫu nhiên).
 
-## 3. Cài đặt môi trường
+## 2. Cài đặt môi trường
 Yêu cầu: Python 3.8 trở lên.
 ```bash
 # Cài đặt các thư viện phụ thuộc
@@ -14,7 +11,7 @@ pip install -r requirements.txt
 
 ```
 
-## 4. Hướng dẫn chạy
+## 3. Hướng dẫn chạy
 
 ### Cách 1: Chạy kiểm thử tự động (Khuyên dùng)
 
