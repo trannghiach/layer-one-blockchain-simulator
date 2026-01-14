@@ -4,9 +4,9 @@ import nacl.exceptions
 from src.utils import deterministic_encode
 
 # Context strings for Domain Separation
-CTX_TX = "TX: CHAIN_2025"      
-CTX_BLOCK = "HEADER: CHAIN_2025" 
-CTX_VOTE = "VOTE: CHAIN_2025"    
+CTX_TX = "TX:22120231"      
+CTX_BLOCK = "HEADER:22120231" 
+CTX_VOTE = "VOTE:22120231"    
 
 class KeyPair:
     def __init__(self, seed_bytes: bytes = None):

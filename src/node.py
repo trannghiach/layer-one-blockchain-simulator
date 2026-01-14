@@ -39,6 +39,14 @@ class Node:
         self.has_prevoted = False
         self.has_precommitted = False
         self.finalized_height = 0
+        
+        # Pending block bodies (waiting for header acceptance)
+        self.pending_headers = {}  # {block_hash: header_data}
+        self.received_bodies = {}  # {block_hash: body_data}
+        
+        # Tracking để loại bỏ duplicates
+        self.seen_votes = set()  # {(vote_type, height, block_hash, voter)}
+        self.seen_txs = set()    # {tx_signature}
 
     def add_peer(self, peer_id: str):
         if peer_id not in self.peers and peer_id != self.node_id:
@@ -53,7 +61,118 @@ class Node:
             for _ in range(self.retry_count):
                 self.send_to_network(peer_id, message)
 
+    def broadcast_block_header_body(self, block: Block):
+        """Broadcast block theo cơ chế Header trước, Body sau (theo yêu cầu đề bài)"""
+        header = {
+            "msg_type": "HEADER",
+            "height": block.height,
+            "parent_hash": block.parent_hash,
+            "state_hash": block.state_hash,
+            "proposer": block.proposer,
+            "signature": block.signature,
+            "timestamp": block.timestamp,
+            "block_hash": block.get_hash()
+        }
+        
+        body = {
+            "msg_type": "BODY",
+            "block_hash": block.get_hash(),
+            "txs": [tx.to_dict() for tx in block.txs]
+        }
+        
+        block_hash = block.get_hash()
+        
+        for peer_id in self.peers:
+            for _ in range(self.retry_count):
+                # Gửi header trước
+                self.sim.send_header(self.node_id, peer_id, header)
+                # Gửi body sau (simulator sẽ đợi header được accept)
+                self.sim.send_body(self.node_id, peer_id, body, block_hash)
+
+    def receive_header(self, sender_id: str, header: dict):
+        """Xử lý khi nhận được block header"""
+        try:
+            block_hash = header.get("block_hash")
+            height = header.get("height")
+            
+            if height != self.current_height:
+                return
+                
+            # Verify header signature
+            header_data = {
+                "height": header["height"],
+                "parent_hash": header["parent_hash"],
+                "txs": [],  # Header không có txs
+                "state_hash": header["state_hash"],
+                "proposer": header["proposer"],
+                "timestamp": header["timestamp"]
+            }
+            
+            from src.crypto import verify_signature
+            if not verify_signature(header["proposer"], header_data, header["signature"], CTX_BLOCK):
+                print(f"Invalid header signature from {sender_id}")
+                return
+            
+            # Lưu header và accept nó
+            self.pending_headers[block_hash] = header
+            self.sim.accept_header(self.node_id, block_hash)
+            
+            # Nếu đã có body, xử lý ngay
+            if block_hash in self.received_bodies:
+                self._process_complete_block(block_hash)
+                
+        except Exception as e:
+            print(f"Error handling header: {e}")
+
+    def receive_body(self, sender_id: str, body: dict):
+        """Xử lý khi nhận được block body"""
+        try:
+            block_hash = body.get("block_hash")
+            
+            # Lưu body
+            self.received_bodies[block_hash] = body
+            
+            # Nếu đã có header, xử lý ngay
+            if block_hash in self.pending_headers:
+                self._process_complete_block(block_hash)
+                
+        except Exception as e:
+            print(f"Error handling body: {e}")
+
+    def _process_complete_block(self, block_hash: str):
+        """Xử lý khi đã có cả header và body của block"""
+        header = self.pending_headers.get(block_hash)
+        body = self.received_bodies.get(block_hash)
+        
+        if not header or not body:
+            return
+            
+        # Tạo block message đầy đủ và xử lý
+        full_msg = {
+            "height": header["height"],
+            "parent_hash": header["parent_hash"],
+            "txs": body["txs"],
+            "state_hash": header["state_hash"],
+            "proposer": header["proposer"],
+            "signature": header["signature"],
+            "timestamp": header["timestamp"]
+        }
+        
+        self.handle_block(full_msg)
+        
+        # Cleanup
+        del self.pending_headers[block_hash]
+        del self.received_bodies[block_hash]
+
     def receive(self, sender_id: str, message: dict):
+        # Xử lý header/body riêng nếu có msg_type
+        if message.get("msg_type") == "HEADER":
+            self.receive_header(sender_id, message)
+            return
+        elif message.get("msg_type") == "BODY":
+            self.receive_body(sender_id, message)
+            return
+            
         if "txs" in message:
             self.handle_block(message)
         elif "type" in message and message["type"] in [Vote.PREVOTE, Vote.PRECOMMIT]:
@@ -131,7 +250,16 @@ class Node:
     def handle_vote(self, msg: dict):
         try:
             vote = Vote(msg['type'], msg['height'], msg['block_hash'], msg['voter'], msg['signature'])
+            
+            # Kiểm tra duplicate vote
+            vote_key = (vote.type, vote.height, vote.block_hash, vote.voter)
+            if vote_key in self.seen_votes:
+                return  # Bỏ qua vote trùng lặp
+            
             if not vote.validate(): return
+            
+            # Đánh dấu đã thấy vote này
+            self.seen_votes.add(vote_key)
             
             is_new = self.consensus.add_vote(vote)
             if not is_new: return

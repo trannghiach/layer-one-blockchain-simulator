@@ -23,13 +23,11 @@ class StateMachine:
             return False
 
         # 2. Kiểm tra quyền sở hữu (Sender chỉ sửa key của chính mình)
-        # Quy tắc: Key phải bắt đầu bằng Sender ID (theo gợi ý đề bài)
-        # Ví dụ: sender="Alice...", key="Alice.../msg"
+        # Quy tắc: Key phải bắt đầu bằng Sender ID (theo yêu cầu đề bài Section 7)
+        # "Each transaction affects only data owned by its sender"
         if not tx.key.startswith(tx.sender):
-            # Trong bài lab đơn giản, có thể bỏ qua hoặc chỉ warning.
-            # Ở đây ta return True để linh hoạt test, 
-            # nhưng đúng logic đề bài là phải return False.
-            pass 
+            print(f"Ownership violation: {tx.sender[:8]} cannot modify key {tx.key[:16]}")
+            return False
 
         # 3. Kiểm tra Nonce (Chống phát lại)
         last_nonce = self.nonces.get(tx.sender, -1)
