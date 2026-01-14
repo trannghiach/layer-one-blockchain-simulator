@@ -2,15 +2,23 @@
 import heapq
 import random
 import logging
+import os
 from collections import defaultdict
 
-# Cấu hình logging để ghi file log theo yêu cầu
-logging.basicConfig(
-    filename='logs/network.log', 
-    level=logging.INFO,
-    format='%(message)s', # Format tùy chỉnh sau
-    filemode='w'
-)
+# Tạo logger riêng cho network (không dùng root logger)
+network_logger = logging.getLogger('network')
+network_logger.setLevel(logging.INFO)
+
+# Đảm bảo thư mục logs tồn tại
+os.makedirs('logs', exist_ok=True)
+
+# Xóa handlers cũ nếu có
+network_logger.handlers.clear()
+
+# Thêm file handler
+_file_handler = logging.FileHandler('logs/network.log', mode='w')
+_file_handler.setFormatter(logging.Formatter('%(message)s'))
+network_logger.addHandler(_file_handler)
 
 class Event:
     def __init__(self, delivery_time, receiver_id, sender_id, message, event_type="MESSAGE"):
@@ -71,12 +79,12 @@ class Simulator:
         # Kiểm tra xem peer có đang bị block không
         if pair_key in self.blocked_peers:
             if self.current_time < self.blocked_peers[pair_key]:
-                logging.info(f"{self.current_time:.3f} BLOCKED {sender_id}->{receiver_id} (rate limit)")
+                network_logger.info(f"{self.current_time:.3f} BLOCKED {sender_id}->{receiver_id} (rate limit)")
                 return False
             else:
                 # Hết thời gian block
                 del self.blocked_peers[pair_key]
-                logging.info(f"{self.current_time:.3f} UNBLOCK {sender_id}->{receiver_id}")
+                network_logger.info(f"{self.current_time:.3f} UNBLOCK {sender_id}->{receiver_id}")
         
         # Cập nhật đếm tin nhắn
         stats = self.message_counts[pair_key]
@@ -90,7 +98,7 @@ class Simulator:
         # Kiểm tra vượt ngưỡng
         if stats["count"] > self.max_msg_per_sec:
             self.blocked_peers[pair_key] = self.current_time + self.block_duration
-            logging.info(f"{self.current_time:.3f} BLOCK {sender_id}->{receiver_id} (exceeded rate limit)")
+            network_logger.info(f"{self.current_time:.3f} BLOCK {sender_id}->{receiver_id} (exceeded rate limit)")
             return False
         
         return True
@@ -101,7 +109,7 @@ class Simulator:
             return
             
         if random.random() < self.drop_prob:
-            logging.info(f"{self.current_time:.3f} DROP_HEADER {sender_id}->{receiver_id}")
+            network_logger.info(f"{self.current_time:.3f} DROP_HEADER {sender_id}->{receiver_id}")
             return
 
         delay = random.uniform(self.min_delay, self.max_delay)
@@ -110,7 +118,7 @@ class Simulator:
         event = Event(delivery_time, receiver_id, sender_id, header, "HEADER")
         heapq.heappush(self.events, event)
         
-        logging.info(f"{self.current_time:.3f} SEND_HEADER {sender_id}->{receiver_id} height={header.get('height')}")
+        network_logger.info(f"{self.current_time:.3f} SEND_HEADER {sender_id}->{receiver_id} height={header.get('height')}")
 
     def send_body(self, sender_id: str, receiver_id: str, body: dict, block_hash: str):
         """Gửi Body của block (chỉ khi receiver đã accept header)"""
@@ -121,11 +129,11 @@ class Simulator:
         if block_hash not in self.accepted_headers[receiver_id]:
             # Lưu pending body để gửi sau khi header được accept
             self.pending_bodies[(sender_id, receiver_id, block_hash)] = body
-            logging.info(f"{self.current_time:.3f} PENDING_BODY {sender_id}->{receiver_id} (waiting for header)")
+            network_logger.info(f"{self.current_time:.3f} PENDING_BODY {sender_id}->{receiver_id} (waiting for header)")
             return
             
         if random.random() < self.drop_prob:
-            logging.info(f"{self.current_time:.3f} DROP_BODY {sender_id}->{receiver_id}")
+            network_logger.info(f"{self.current_time:.3f} DROP_BODY {sender_id}->{receiver_id}")
             return
 
         delay = random.uniform(self.min_delay, self.max_delay)
@@ -134,7 +142,7 @@ class Simulator:
         event = Event(delivery_time, receiver_id, sender_id, body, "BODY")
         heapq.heappush(self.events, event)
         
-        logging.info(f"{self.current_time:.3f} SEND_BODY {sender_id}->{receiver_id} height={body.get('height')}")
+        network_logger.info(f"{self.current_time:.3f} SEND_BODY {sender_id}->{receiver_id} height={body.get('height')}")
 
     def accept_header(self, receiver_id: str, block_hash: str):
         """Node báo đã accept header, cho phép nhận body"""
@@ -160,7 +168,7 @@ class Simulator:
         
         # 1. DROP: Kiểm tra xem tin có bị mất không
         if random.random() < self.drop_prob:
-            logging.info(f"{self.current_time:.3f} DROP {sender_id}->{receiver_id} {message}")
+            network_logger.info(f"{self.current_time:.3f} DROP {sender_id}->{receiver_id} {message}")
             return # Tin nhắn biến mất
 
         # 2. DELAY: Tính toán thời gian đến ngẫu nhiên
@@ -172,14 +180,14 @@ class Simulator:
         heapq.heappush(self.events, event)
         
         # Log sự kiện SEND
-        logging.info(f"{self.current_time:.3f} SEND {sender_id}->{receiver_id} msg={message}")
+        network_logger.info(f"{self.current_time:.3f} SEND {sender_id}->{receiver_id} msg={message}")
 
         # 3. DUPLICATE: Nhân đôi tin nhắn
         if random.random() < self.duplicate_prob:
             extra_delay = random.uniform(self.min_delay, self.max_delay)
             dup_event = Event(delivery_time + extra_delay, receiver_id, sender_id, message)
             heapq.heappush(self.events, dup_event)
-            logging.info(f"{self.current_time:.3f} DUPLICATE {sender_id}->{receiver_id}")
+            network_logger.info(f"{self.current_time:.3f} DUPLICATE {sender_id}->{receiver_id}")
 
     def run(self, max_time=100.0):
         """Vòng lặp chính xử lý sự kiện"""
@@ -201,10 +209,10 @@ class Simulator:
                 
                 if event.event_type == "HEADER":
                     node.receive_header(event.sender_id, event.message)
-                    logging.info(f"{self.current_time:.3f} RECV_HEADER {event.receiver_id}<-{event.sender_id}")
+                    network_logger.info(f"{self.current_time:.3f} RECV_HEADER {event.receiver_id}<-{event.sender_id}")
                 elif event.event_type == "BODY":
                     node.receive_body(event.sender_id, event.message)
-                    logging.info(f"{self.current_time:.3f} RECV_BODY {event.receiver_id}<-{event.sender_id}")
+                    network_logger.info(f"{self.current_time:.3f} RECV_BODY {event.receiver_id}<-{event.sender_id}")
                 else:
                     node.receive(event.sender_id, event.message)
-                    logging.info(f"{self.current_time:.3f} RECV {event.receiver_id}<-{event.sender_id} msg={event.message}")
+                    network_logger.info(f"{self.current_time:.3f} RECV {event.receiver_id}<-{event.sender_id} msg={event.message}")
